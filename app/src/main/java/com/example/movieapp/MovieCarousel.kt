@@ -1,9 +1,13 @@
 package com.example.movieapp
 
-import androidx.annotation.FloatRange
+import androidx.compose.animation.asDisposableClock
+import androidx.compose.animation.core.TargetAnimation
+import androidx.compose.foundation.InteractionState
+import androidx.compose.foundation.animation.FlingConfig
+import androidx.compose.foundation.animation.defaultFlingConfig
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.rememberScrollableController
+import androidx.compose.foundation.gestures.ScrollableController
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,24 +16,20 @@ import androidx.compose.material.ButtonConstants
 import androidx.compose.material.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ContentDrawScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.DrawModifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.gesture.scrollorientationlocking.Orientation
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.*
-import androidx.compose.ui.platform.AmbientConfiguration
-import androidx.compose.ui.platform.InspectorInfo
-import androidx.compose.ui.platform.InspectorValueInfo
-import androidx.compose.ui.platform.debugInspectorInfo
-import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.*
+import androidx.compose.ui.unit.*
 import dev.chrisbanes.accompanist.coil.CoilImage
 import java.util.*
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import com.google.android.material.math.MathUtils.lerp
 
 
 val posterAspectRatio = .674f
@@ -37,16 +37,55 @@ val posterAspectRatio = .674f
 @Composable
 fun Screen() {
     val configuration = AmbientConfiguration.current
+    val density = AmbientDensity.current
+
     val screenWidth = configuration.screenWidthDp.dp
+    val screenWidthPx = with(density) { screenWidth.toPx() }
+
     val screenHeight = configuration.screenHeightDp.dp
+    val screenHeightPx = with(density) { screenHeight.toPx() }
 
 
     var offset by remember { mutableStateOf(0f) }
 
-    val ctrlr = rememberScrollableController {
-        offset = offset.plus(it)
-        it
+    val posterWidthDp = screenWidth * 0.6f
+    val posterSpacingPx = with(density) { posterWidthDp.toPx() + 20.dp.toPx() }
+
+    val flingConfig = defaultFlingConfig {
+        TargetAnimation((it / posterSpacingPx).roundToInt() * posterSpacingPx)
     }
+    val indexFraction = -1 * offset / posterSpacingPx
+
+    /** Scroll controller */
+    val upperBound = 0f
+    val lowerBound = -1 * movies.size * posterSpacingPx
+    val ctrlr = rememberScrollableController(flingConfig) {
+        val target = offset + it
+        when {
+            target in lowerBound..upperBound -> {
+                offset = target
+                it
+            }
+            target > upperBound -> {
+                val consumed = upperBound - offset
+                offset = upperBound
+                consumed
+            }
+            target < lowerBound -> {
+                val consumed = lowerBound - offset
+                offset = lowerBound
+                consumed
+
+            }
+            else -> {
+                offset = target
+                it
+            }
+        }
+
+    }
+
+
     /** Box (previously called Stack) is a layout that puts elements on top of each other */
     Box(
         Modifier
@@ -59,10 +98,42 @@ fun Screen() {
     )
     {
         movies.forEachIndexed { index, movie ->
-            /** white background image */
+
+            /** make image visible or not regarding which card is shown on the screen
+            if index fraction is a whole number we will be rendering 3 images that are shown on screen
+             */
+            val isInRange = (index >= indexFraction - 1 && indexFraction + 1 >= index)
+            val opacity = if (isInRange) 1f else 0f
+//            val fraction = when {
+//
+//            }
+            //create a shape which is what draw layer will clip based on
+            val shape = when {
+                !isInRange -> RectangleShape //if it's out the bounds return a rectangle shape
+                index <= indexFraction -> {
+                    val fraction = indexFraction - index
+                    FractionalRectangleShape(fraction, 1f)
+                }
+
+                else -> {
+                    val fraction = indexFraction - index + 1
+                    FractionalRectangleShape(0f, fraction)
+                }
+
+            }
+
+
+            /** Background image */
+
+
             CoilImage(
                 data = movie.bgUrl,
                 modifier = Modifier
+                    .graphicsLayer(
+                        alpha = opacity,
+                        shape = shape,
+                        clip = true
+                    )
                     .fillMaxWidth()
                     .aspectRatio(posterAspectRatio)
 
@@ -71,28 +142,46 @@ fun Screen() {
         /** White gradient in the background */
         Spacer(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
+                .align(Alignment.BottomEnd)
                 .fillMaxWidth()
-                .fillMaxHeight(0.3f) //fills 30% of the screen
-                .background(VerticalGradient(
-                    0f to Color.White,
-                         screenHeight.value to Color.Transparent,
-                          startY = screenHeight.value,
-                          endY = 0f))
+                .fillMaxHeight(0.6f) //fills 70% of the screen
+                .background(
+                    VerticalGradient(
+                        0.6f to Color.White,
+                        1f to Color.Transparent,
+                        startY = screenHeight.value,
+                        endY = 0f
+                    )
+                )
         )
 
         movies.forEachIndexed { index, movie ->
+
+            /** adjust Y position based on how far integer multiple of screen width it is
+             * when poster is screenWidthPx * index then poster will be centered
+             * 0 is when the first poster is centered
+             * */
+            val center = posterSpacingPx * index
+
+            val distFromCenter =
+                abs(offset + center) / posterSpacingPx //returns how many screen widths away card is from being centered
             MoviePoster(
                 movie = movie,
                 modifier = Modifier
-                    .offset(getX = { offset.dp + (screenWidth * index) }, getY = { 0.dp })
-                    .width(screenWidth * 0.75f)
+                    .offset(getX = { offset + (center) }, getY = { lerp(0f, 50f, distFromCenter) })
+                    .width(posterWidthDp)
+                    .align(Alignment.BottomCenter)
             )
         }
 
     }
 }
 
+//fun lerp(start: Float, stop: Float, fraction: Float) : Float {
+//    return (1 - fraction) * start + fraction * stop
+//}
+
+/** Card that represends movie poster*/
 @Composable
 fun MoviePoster(movie: Movie, modifier: Modifier = Modifier) {
 
@@ -162,8 +251,8 @@ fun Chip(label: String, modifier: Modifier = Modifier) {
 
 
 fun Modifier.offset(
-    getX: () -> Dp,
-    getY: () -> Dp,
+    getX: () -> Float,
+    getY: () -> Float,
     rtlAware: Boolean = false,
 ): Modifier = this then object : LayoutModifier {
     override fun MeasureScope.measure(
@@ -173,14 +262,38 @@ fun Modifier.offset(
         val placeable = measurable.measure(constraints)
         return layout(placeable.width, placeable.height) {
             if (rtlAware) {
-                placeable.placeRelativeWithLayer(getX().toIntPx(), getY().toIntPx())
+                placeable.placeRelativeWithLayer(getX().roundToInt(), getY().roundToInt())
             } else {
-                placeable.placeWithLayer(getX().toIntPx(), getY().toIntPx())
+                placeable.placeWithLayer(getX().roundToInt(), getY().roundToInt())
             }
         }
     }
 }
 
+fun FractionalRectangleShape(startFracton: Float, endFraction: Float) = object : Shape {
+    override fun createOutline(size: Size, density: Density) =
+        Outline.Rectangle(
+            Rect(
+                top = 0f,
+                left = startFracton * size.width,
+                bottom = size.height,
+                right = endFraction * size.width
+
+            )
+        )
+}
+
+@Composable
+fun rememberScrollableController(
+    flingConfig: FlingConfig = defaultFlingConfig(),
+    interactionState: InteractionState? = null,
+    consumeScrollDelta: (Float) -> Float
+): ScrollableController {
+    val clocks = AmbientAnimationClock.current.asDisposableClock()
+    return remember(clocks, flingConfig, interactionState) {
+        ScrollableController(consumeScrollDelta, flingConfig, clocks, interactionState)
+    }
+}
 
 
 
