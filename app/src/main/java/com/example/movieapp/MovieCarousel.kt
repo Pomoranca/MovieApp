@@ -27,9 +27,8 @@ import androidx.compose.ui.platform.*
 import androidx.compose.ui.unit.*
 import dev.chrisbanes.accompanist.coil.CoilImage
 import java.util.*
-import kotlin.math.abs
-import kotlin.math.roundToInt
 import com.google.android.material.math.MathUtils.lerp
+import kotlin.math.*
 
 
 val posterAspectRatio = .674f
@@ -55,10 +54,12 @@ fun Screen() {
         TargetAnimation((it / posterSpacingPx).roundToInt() * posterSpacingPx)
     }
     val indexFraction = -1 * offset / posterSpacingPx
+    val leftIndex = floor(indexFraction)
+    val rightIndex = ceil(indexFraction)
 
     /** Scroll controller */
     val upperBound = 0f
-    val lowerBound = -1 * movies.size * posterSpacingPx
+    val lowerBound = -1 * (movies.size -1) * posterSpacingPx
     val ctrlr = rememberScrollableController(flingConfig) {
         val target = offset + it
         when {
@@ -102,8 +103,8 @@ fun Screen() {
             /** make image visible or not regarding which card is shown on the screen
             if index fraction is a whole number we will be rendering 3 images that are shown on screen
              */
-            val isInRange = (index >= indexFraction - 1 && indexFraction + 1 >= index)
-            val opacity = if (isInRange) 1f else 0f
+            val isInRange = (index >= indexFraction - 1 && indexFraction + 1 > index)
+            val opacity = 1f //if (isInRange) 1f else 0f
 //            val fraction = when {
 //
 //            }
@@ -112,12 +113,12 @@ fun Screen() {
                 !isInRange -> RectangleShape //if it's out the bounds return a rectangle shape
                 index <= indexFraction -> {
                     val fraction = indexFraction - index
-                    FractionalRectangleShape(fraction, 1f)
+                    FractionalRectangleShape(fraction.coerceIn(0f,1f), 1f)
                 }
 
                 else -> {
                     val fraction = indexFraction - index + 1
-                    FractionalRectangleShape(0f, fraction)
+                    FractionalRectangleShape(0f, max(fraction, Float.MIN_VALUE))
                 }
 
             }
